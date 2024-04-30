@@ -1,0 +1,9 @@
+algorithm: ordinary
+variogram_model: gaussian
+variogram_parameters: null
+nlags: 6
+anisotropy_scaling_y: 1.0
+anisotropy_scaling_z: 1.0
+anisotropy_angle_x: 0.0
+anisotropy_angle_y: 0.0
+anisotropy_angle_z: 0.0
