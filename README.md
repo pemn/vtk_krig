@@ -16,6 +16,7 @@ display||show results in a chart window
  - Empty grids can be created using the tool vtk_create_grid.py
  - Hard data *must* contain x,y,z columns, either with those exact names or popular synonyms. Ex.: x, easting, mid_x, leste
  - Results can be visualized with tools such as db_voxel_view.py or softwares such as Paraview and F3D.
+ - check sample_data folder on this project for some test files
 
 ### Possible Variogram parameters and their default values
 name|default
@@ -33,7 +34,7 @@ anisotropy_angle_z|0.0
 ## 📚 Examples
 ### input hard data
 ![screenshot3](https://github.com/pemn/assets/blob/main/vtk_krig3.png?raw=true)
-### output estimade grid
+### output estimated grid
 ![screenshot2](https://github.com/pemn/assets/blob/main/vtk_krig2.png?raw=true)
 ## 🧩 Compatibility
 distribution|status
@@ -46,4 +47,4 @@ Any question or problem contact:
  - paulo.ernesto
 ## 💎 License
 Apache 2.0
-Copyright ![vale_logo_only](https://github.com/pemn/assets/blob/main/vale_logo_only_r.svg?raw=true) Vale 2023
+Copyright ![vale_logo_only](https://github.com/pemn/assets/blob/main/vale_logo_only_r.svg?raw=true) Vale 2024
