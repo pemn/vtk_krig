@@ -39,9 +39,12 @@ if 'VULCAN_EXE' in os.environ:
 logging.basicConfig(format='%(message)s', level=99)
 log = lambda *argv: logging.log(99, time.strftime('%H:%M:%S ') + ' '.join(map(str,argv)))
 
-def pyd_zip_extract():
+def pyd_zip_extract(zip_path = None):
   ''' embedded module unpacker '''
-  zip_path = os.path.splitext(sys.argv[0])[0] + '.pyz'
+  if zip_path is None:
+    zip_path = os.path.splitext(sys.argv[0])[0] + '.pyz'
+  if zip_path not in sys.path:
+    sys.path.append(zip_path)
   if not os.path.exists(zip_path):
     return
   platform_arch = '.cp%d%d-win_amd64' % (sys.hexversion >> 24, sys.hexversion >> 16 & 0xFF)
@@ -259,6 +262,11 @@ def pd_load_dataframe(df_path, condition = '', table_name = None, vl = None, kee
   elif df_path.lower().endswith('bef'):
     from vulcan_mapfile import bef_to_df
     df = bef_to_df(df_path)
+  elif df_path.lower().endswith('zip'):
+    from zipfile import ZipFile
+    s = ZipFile(df_path).namelist()
+    df = pd.DataFrame(s, columns=['name'])
+    df['archive'] = os.path.splitext(os.path.basename(df_path))[0]
   elif df_path.lower().endswith('obj'):
     df = pd_load_obj(df_path)
   elif df_path.lower().endswith('vtk'):
@@ -318,7 +326,7 @@ def pd_synonyms(df, synonyms, default = 0):
 def pd_detect_xyz(df, z = True):
   xyz = None
   dfcs = set(df.columns)
-  for s in [['x','y','z'], ['midx','midy','midz'], ['mid_x','mid_y','mid_z'], ['xworld','yworld','zworld'], ['xcentre','ycentre','zcentre'], ['centroid_x', 'centroid_y', 'centroid_z'], ['xc','yc','zc'], ['leste', 'norte', 'cota']]:
+  for s in [['x','y','z'], ['midx','midy','midz'], ['mid_x','mid_y','mid_z'], ['xworld','yworld','zworld'], ['xcentre','ycentre','zcentre'], ['centroid_x', 'centroid_y', 'centroid_z'], ['xc','yc','zc'], ['xp','yp','zp'], ['leste', 'norte', 'cota']]:
     if z == False:
       s.pop()
     for c in [str.lower, str.upper,str.capitalize]:
@@ -1115,6 +1123,9 @@ def pd_load_dxf(df_path):
     elif e.dxftype() == 'TEXT':
       points.append(e.insert)
       text = e.plain_text()
+    elif e.dxftype() == 'LINESTRING':
+      points = e.points()
+      is_closed = 0
     elif e.dxftype() == 'POINT':
       points.append(e.dxf.location)
       is_closed = 0
@@ -2057,7 +2068,7 @@ class FileEntry(ttk.Frame):
 
     self._control['cursor'] = 'watch'
     if len(self._wildcard_list):
-      self._control['values'] = [_ for _ in os.listdir('.') if re.search('\.(?:' + '|'.join(self._wildcard_list) + ')$', _)]
+      self._control['values'] = [_ for _ in os.listdir('.') if re.search(r'\.(?:' + '|'.join(self._wildcard_list) + ')$', _)]
     else:
       self._control['values'] = os.listdir('.')
 

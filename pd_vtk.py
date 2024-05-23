@@ -1,4 +1,5 @@
 #!python
+# assorted library with the general goal of adapting VTK to geology and mining purposes
 '''
 Copyright 2017 - 2021 Vale
 
@@ -248,7 +249,7 @@ def vtk_df_to_mesh(df, xyz = None, dropna = False):
     pdata = pdata.dropna()
   # TODO: fix NaN without drop
 
-  if 'n' in df and df.dtypes['n'].dtype.num == 7 and np.max(df['n']) > 0:
+  if 'n' in df and df.dtypes['n'].num == 7 and np.max(df['n']) > 0:
     if 'node' in df:
       cells = vtk_flat_to_cells(df['n'], df['node'])
       nodes = df['node'].drop_duplicates().sort_values()
@@ -585,6 +586,28 @@ def vtk_cell_size(self):
   b0 = np.reshape(self.bounds, (3,2))
   p0 = np.subtract(b0[:, 1], b0[:, 0])
   return np.divide(p0, np.maximum(np.subtract(self.dimensions, 1), 1))
+
+def vtk_plot_grid_vars(grid, variables):
+  import matplotlib.pyplot as plt
+  cmap = plt.get_cmap()
+  if not isinstance(variables, (list, tuple)):
+    variables = [variables]
+
+  nrows = int(np.sqrt(len(variables)))
+  ncols = int(np.ceil(len(variables) / nrows))
+  fig, ax = plt.subplots(nrows, ncols, tight_layout=True, squeeze=False, subplot_kw=dict(projection='3d'))
+  ax
+  for i in range(len(variables)):
+    s = vtk_array_ijk(grid, variables[i])
+    if s.dtype.num >= 17:
+      u, s = np.unique(s, return_inverse=True)
+      s = vtk_reshape_ijk(grid.dimensions, s, True)
+    if np.var(s):
+      s = np.maximum(np.divide(np.subtract(s, np.min(s)), np.subtract(np.max(s), np.min(s))), 0.001)
+    ax.flat[i].set_title(variables[i])
+    ax.flat[i].voxels(s, facecolors=cmap(s))
+
+  plt.show()
 
 def vtk_plot_grids(grids, variable = None):
   if not isinstance(grids, (list, tuple)):
@@ -1001,7 +1024,11 @@ class vtk_Voxel(object):
     return cp
 
   def to_bmf(self, output = None):
-    import vulcan
+    try:
+      import vulcan
+    except:
+      log("Maptek Vulcan API not available")
+      return
     if not output:
       import tempfile
       output = tempfile.NamedTemporaryFile(suffix='.bmf').name
@@ -1012,7 +1039,6 @@ class vtk_Voxel(object):
     log("create regular")
     bm.create_regular(output, 0, 0, 0, *xyz1, int(xyzn[0]), int(xyzn[1]), int(xyzn[2]))
     bm.set_model_origin(bb[0, 0], bb[1, 0], bb[2, 0])
-    #bl = bm.get_regular_indices()
     bl = np.arange(bm.n_blocks())
     log("index model")
     bm.index_model()
@@ -1020,8 +1046,6 @@ class vtk_Voxel(object):
     for v in self.cell_arrays:
       if bm.field_predefined(v):
         continue
-      #s = np.transpose(vtk_array_ijk(self, v, True), (1,0,2))
-      #s = np.transpose(np.reshape(self.get_array(v), xyzn), (2,1,0))
       s = self.get_array(v)
       if s.dtype.num < 17:
         log('add variable', v, s.dtype, s.size, 'float')
@@ -1034,6 +1058,26 @@ class vtk_Voxel(object):
     bm.write()
 
     return bm
+
+  def find_neighbors(self, distance = None):
+    ' for each cell, return a list of its neighbors '
+    r = []
+    if not distance:
+      # when distance is 0 or blank use the much faster VTK built in solution
+      r = [self.cell_neighbors(_, 'faces') for _ in range(self.n_cells)]
+    else:
+      # Define the neighborhood offsets for N dimensions
+      nm = np.reshape(np.transpose(np.subtract(np.indices(np.full(3, 3)), distance)), (-1, 3))
+      # Remove the center cell
+      nm = np.delete(nm, nm.shape[0] // 2, axis=0)
+      d = np.flipud(self.shape)
+      si = np.arange(self.n_cells).reshape(d)
+      for rn, ri in np.ndenumerate(si):
+        nd = np.add(nm, rn)
+        bi = np.logical_not(np.any(np.logical_or(np.greater_equal(nd, d), np.less(nd, 0)), 1))
+        r.append(np.ravel_multi_index(nd[bi], d))
+
+    return r
 
   @classmethod
   def factory(cls, data = None):
@@ -1400,10 +1444,19 @@ def vtk_linear_model(grid, df1, vl):
   xyz = pd_detect_xyz(df1)
   df0 = pd.DataFrame(grid.cell_centers().points, columns=xyz)
   for v in vl:
-    s = pd_linear_model(df0, df1, xyz, v)
+    s, n = pd_linear_model(df0, df1, xyz, v)
     grid.cell_data[v] = s
+  return None
 
-  return True
+def vtk_linear_model_variables(grid, df1, vl, lito):
+  from db_linear_model import pd_linear_model_variables
+  from _gui import pd_detect_xyz
+  xyz = pd_detect_xyz(df1)
+  df0 = pd.concat([pd.DataFrame(grid.cell_centers().points, columns=xyz), pd.Series(grid.get_array(lito), name=lito)], axis=1)
+  pd_linear_model_variables(df0, lito, df1, xyz, lito, vl)
+  for v in vl:
+    grid.cell_data[v] = df0[v]
+  return None
 
 def pd_flag_decluster(df0, grid_size, name = 'decluster'):
   mesh = vtk_df_to_mesh(df0)
@@ -1442,26 +1495,11 @@ def vtk_tif_to_grid(fp, cell_size = (1,1,1)):
     grid.cell_data['0'] = img.flat
     return grid
 
-#def vtk_reblock(grid, cell_size):
-#  if np.ndim(cell_size) < 1:
-#    cell_size = np.full(3, float(cell_size))
-#  print(vtk_mesh_info(grid))
-#  s0 = vtk_array_ijk(grid, None, False)
-#  d = np.divide(np.multiply(grid.spacing, np.add(grid.dimensions,1)), cell_size).astype(np.int_)
-#  mesh = pv.ImageData(spacing=cell_size, dimensions=d)
-#  print(mesh)
-#  s1 = vtk_array_ijk(mesh, None, False)
-#  print(s0.shape)
-#  print(s1.shape)
-  #if np.sum(np.mod(ncell_size, grid.spacing)) > 0.01:
-  #  raise Exception('new cell size',cell_size,'must be a multiple of current cell size',grid.spacing)
-
-
-#if __name__=="__main__":
-#  if len(sys.argv) > 1:
-    #grid = vtk_Voxel.factory('std_voxel_0.vtk')
-    # grid = vtk_Voxel.cls_init((100,100,100),(10,10,10), (1000,1000,1000))
-    # grid.cells_volume('volume')
-    # vtk_grid_flag_ijk(grid, 'ijk')
-    # print(vtk_mesh_info(grid))
-    # grid.to_bmf(sys.argv[1])
+if __name__=="__main__":
+  ...
+  # if len(sys.argv) > 1:
+  #   grid = vtk_Voxel.cls_init((6,5,4), (10,10,10), (0,0,0))
+  #   vtk_grid_flag_ijk(grid)
+  #   gcn = grid.find_neighbors(int(sys.argv[1]))
+  #   grid['count'] = np.fromiter(map(len, gcn), np.int_)
+  #   vtk_plot_grid_vars(grid, ['ijk', 'count'])
