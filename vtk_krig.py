@@ -39,6 +39,8 @@ class KrigVar(dict):
     self.update(default_variogram)
     if not fp:
       ...
+    elif isinstance(fp, dict):
+      self.update(fp)
     elif not os.path.exists(fp):
       print("file not found:", fp)
     elif result.lower().endswith('json'):
@@ -91,23 +93,27 @@ class KrigVar(dict):
       hard_bi = np.equal(hard_lito, l)
       for v in vl:
         log("lito", l, "variable", v)
-        s = self.krig3d(df.loc[hard_bi, xyz + [v]].dropna().values, points[soft_bi])
-        if s is not None:
-          grid.cell_data[v] = s
+        s = df.loc[hard_bi, xyz + [v]].dropna().values
+        d = np.full(soft_bi.size, np.nan)
+        if s.size:
+          r = self.krig3d(s, points[soft_bi])
+          if r is not None:
+            d[soft_bi] = r
+        grid.cell_data[v] = d
 
 
 def main(soft_db, hard_db, lito, variables, variogram, output, display):
   log("# vtk_krig started")
   grid = pv.read(soft_db)
+
   kv = KrigVar(variogram)
   vl = variables.split(';')
   kv(grid, pd_load_dataframe(hard_db), lito, vl)
-
   if output:
     grid.save(output)
 
   if int(display):
-    from pd_vtk import vtk_voxel_view
+    from pd_vtk import vtk_voxel_view, vtk_mesh_info
     for v in vl:
       vtk_voxel_view(grid, v)
 

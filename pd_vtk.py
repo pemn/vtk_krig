@@ -603,7 +603,7 @@ def vtk_plot_grid_vars(grid, variables):
       u, s = np.unique(s, return_inverse=True)
       s = vtk_reshape_ijk(grid.dimensions, s, True)
     if np.var(s):
-      s = np.maximum(np.divide(np.subtract(s, np.min(s)), np.subtract(np.max(s), np.min(s))), 0.001)
+      s = np.maximum(np.divide(np.subtract(s, np.nanmin(s)), np.subtract(np.nanmax(s), np.nanmin(s))), 0.001)
     ax.flat[i].set_title(variables[i])
     ax.flat[i].voxels(s, facecolors=cmap(s))
 
@@ -843,8 +843,7 @@ class vtk_Voxel(object):
 
   @property
   def shape(self):
-    shape = np.subtract(self.dimensions, 1)
-    return shape[shape.nonzero()]
+    return np.maximum(np.subtract(self.dimensions, 1), 1)
 
   def set_ndarray(self, name, array, preference='cell'):
     if preference=='cell':
@@ -983,43 +982,21 @@ class vtk_Voxel(object):
       g2d = fn.reduce(g3d, axis)
     return g2d
 
-  def coplanar(self, array_name, coplanar_borders = False, ndim = 3):
-    ''' flag cells that have the same value as all neighbors '''
+  def coplanar(self, array_name, borders = False):
+    ''' flag cells that have the same value as all neighbors, VTK builtin '''
     sa = self.get_array(array_name)
-    cell = self.get_array_association(array_name) == pv.FieldAssociation.CELL 
-    sd = vtk_shape_ijk(self.dimensions, cell)
-    sk = np.reshape(sa, sd)
+    sn = self.find_neighbors()
     cp = np.zeros(sa.size, dtype=np.int_)
-    # create the neighbor vector array
-    sides = np.pad(np.eye(ndim, dtype=np.int_), (0, 3 - ndim))
-    neighbors = np.concatenate((sides, np.multiply(sides, -1)), 0)
-
-    si = np.reshape(np.moveaxis(np.indices(sd), 0, -1), (sa.size, len(sd)))
-    for i in range(sa.size):
-      ijk = si[i]
-      for row in neighbors:
-        n = np.add(row, ijk)
-        for j in range(sd.size):
-          # small dimensions should not check for beyond border
-          if sd[j] < 3:
-            n[j] = ijk[j]
-            continue
-          # neighbor position is beyond border
-          if n[j] < 0 or n[j] >= sd[j]:
-            if coplanar_borders:
-              n[j] = ijk[j]
-            else:
-              # which means the central is not coplanar
-              break
-        else:
-          # neighbor is different, so central is not coplanar
-          if sa[i] != sk[tuple(n)]:
-            break
-          continue
-        break
+    for ri in range(sa.size):
+      if len(sn[ri]) == 0:
+        continue
+      for ni in sn[ri]:
+        if sa[ri] != sa[ni]:
+          break
       else:
-        # if all checks passed, central is coplanar
-        cp[i] = True
+        cp[ri] = True
+      
+      
 
     return cp
 
@@ -1059,23 +1036,30 @@ class vtk_Voxel(object):
 
     return bm
 
-  def find_neighbors(self, distance = None):
+  def find_neighbors(self, distance = 0):
     ' for each cell, return a list of its neighbors '
     r = []
-    if not distance:
+    #  and self.GetDataObjectType() == 2
+    if distance == 0 and self.GetDataObjectType() == 6:
       # when distance is 0 or blank use the much faster VTK built in solution
       r = [self.cell_neighbors(_, 'faces') for _ in range(self.n_cells)]
     else:
       # Define the neighborhood offsets for N dimensions
-      nm = np.reshape(np.transpose(np.subtract(np.indices(np.full(3, 3)), distance)), (-1, 3))
-      # Remove the center cell
-      nm = np.delete(nm, nm.shape[0] // 2, axis=0)
+      nm = None
+      if distance == 0:
+        # immediate neighbors (max 6)
+        sides = np.eye(3, dtype=np.int_)
+        nm = np.concatenate((sides, np.multiply(sides, -1)), 0)
+      else:
+        nm = np.reshape(np.transpose(np.subtract(np.indices(np.full(3, distance * 2 + 1)), distance)), (-1, 3))
+        # Remove the center cell
+        nm = np.delete(nm, nm.shape[0] // 2, axis=0)
       d = np.flipud(self.shape)
       si = np.arange(self.n_cells).reshape(d)
       for rn, ri in np.ndenumerate(si):
         nd = np.add(nm, rn)
         bi = np.logical_not(np.any(np.logical_or(np.greater_equal(nd, d), np.less(nd, 0)), 1))
-        r.append(np.ravel_multi_index(nd[bi], d))
+        r.append(np.ravel_multi_index(np.transpose(nd[bi]), d))
 
     return r
 
@@ -1458,6 +1442,11 @@ def vtk_linear_model_variables(grid, df1, vl, lito):
     grid.cell_data[v] = df0[v]
   return None
 
+def vtk_krig_model_variables(grid, df1, vl, lito, variogram):
+  from vtk_krig import KrigVar
+  kv = KrigVar(variogram)
+  kv(grid, df1, lito, vl)
+
 def pd_flag_decluster(df0, grid_size, name = 'decluster'):
   mesh = vtk_df_to_mesh(df0)
   grid = vtk_Voxel.from_mesh(mesh, grid_size)
@@ -1497,9 +1486,10 @@ def vtk_tif_to_grid(fp, cell_size = (1,1,1)):
 
 if __name__=="__main__":
   ...
-  # if len(sys.argv) > 1:
-  #   grid = vtk_Voxel.cls_init((6,5,4), (10,10,10), (0,0,0))
-  #   vtk_grid_flag_ijk(grid)
-  #   gcn = grid.find_neighbors(int(sys.argv[1]))
-  #   grid['count'] = np.fromiter(map(len, gcn), np.int_)
-  #   vtk_plot_grid_vars(grid, ['ijk', 'count'])
+  if len(sys.argv) > 1:
+    grid = vtk_Voxel.cls_init((6,5,4), (10,10,10), (0,0,0))
+    vtk_grid_flag_ijk(grid)
+    gcn = grid.find_neighbors(int(sys.argv[1]))
+    print(gcn)
+    #grid['count'] = np.fromiter(map(len, gcn), np.int_)
+    #vtk_plot_grid_vars(grid, ['ijk', 'count'])
